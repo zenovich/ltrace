@@ -1,6 +1,7 @@
 #include <gelf.h>
 #include <sys/ptrace.h>
 #include "common.h"
+#include "ptrace.h"
 
 GElf_Addr
 arch_plt_sym_val(struct ltelf *lte, size_t ndx, GElf_Rela * rela) {

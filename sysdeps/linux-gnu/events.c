@@ -7,9 +7,8 @@
 #include <errno.h>
 #include <signal.h>
 #include <string.h>
-#include <sys/ptrace.h>
 
-#include "common.h"
+#include "trace.h"
 
 static Event event;
 

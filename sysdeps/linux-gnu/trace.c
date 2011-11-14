@@ -5,10 +5,9 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include "ptrace.h"
 #include <asm/unistd.h>
 
-#include "common.h"
+#include "trace.h"
 
 /* If the system headers did not provide the constants, hard-code the normal
    values.  */
