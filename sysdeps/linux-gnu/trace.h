@@ -6,7 +6,7 @@
 #include "common.h"
 
 #ifndef PTRACE_EVENT_FORK
-#warning  PTRACE_EVENT_FORK not found... redefining.
+//#warning  PTRACE_EVENT_FORK not found... redefining.
 #define PTRACE_OLDSETOPTIONS    21
 #define PTRACE_SETOPTIONS       0x4200
 #define PTRACE_GETEVENTMSG      0x4201
