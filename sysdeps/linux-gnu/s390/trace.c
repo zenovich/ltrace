@@ -203,3 +203,15 @@ gimme_arg(enum tof type, Process *proc, int arg_num, arg_type_info *info) {
 void
 save_register_args(enum tof type, Process *proc) {
 }
+
+void
+set_arch_dep(Process *proc) {
+	fprintf(stderr, "set_arch_dep is not supported on your platform\n");
+	exit(1);
+}
+
+void
+set_arg(enum tof type, Process *proc, int arg_num, arg_type_info *info, long value) {
+	fprintf(stderr, "set_arg is not supported on your platform\n");
+	exit(1);
+}

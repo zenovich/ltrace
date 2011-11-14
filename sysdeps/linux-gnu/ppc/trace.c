@@ -122,7 +122,7 @@ gimme_retval(Process *proc, int arg_num, arg_type_info *info,
 
 		return cvt.val;
 	}
-	else 
+	else
 		return (*regs)[3];
 }
 
@@ -188,7 +188,7 @@ arch_umovelong (Process *proc, void *addr, long *result, arg_type_info *info) {
 
 	if (info) {
 		if (info->type == ARGTYPE_INT || (proc->mask_32bit && (info->type == ARGTYPE_POINTER
-		    || info->type == ARGTYPE_STRING))) {
+		    || info->type == ARGTYPE_STRING || info->type == ARGTYPE_BYTES))) {
 			pointed_to = (long) (((unsigned long) pointed_to) >> 32);
 		}
 	}
@@ -196,4 +196,16 @@ arch_umovelong (Process *proc, void *addr, long *result, arg_type_info *info) {
 
 	*result = pointed_to;
 	return 0;
+}
+
+void
+set_arch_dep(Process *proc) {
+	fprintf(stderr, "set_arch_dep is not supported on your platform\n");
+	exit(1);
+}
+
+void
+set_arg(enum tof type, Process *proc, int arg_num, arg_type_info *info, long value) {
+	fprintf(stderr, "set_arg is not supported on your platform\n");
+	exit(1);
 }

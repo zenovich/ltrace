@@ -224,11 +224,56 @@ umovestr(Process *proc, void *addr, int len, void *laddr) {
 				*(char *)(laddr + offset + i) = a.c[i];
 			} else {
 				*(char *)(laddr + offset + i) = '\0';
-				return 0;
+				return offset + (signed)i;
 			}
 		}
 		offset += sizeof(long);
 	}
 	*(char *)(laddr + offset) = '\0';
-	return 0;
+	return offset;
+}
+
+size_t
+uunmovebytes(Process *proc, void *addr, void *laddr, size_t len) {
+	union {
+		long a;
+		char c[sizeof(long)];
+	} a;
+	int started = 0;
+	size_t offset = 0, bytes_written = 0;
+
+	while (offset < len) {
+		if (len - offset >= sizeof(long)) {
+			memcpy(&a.c[0], laddr + offset, sizeof(long));
+		}
+		else {
+			a.a = ptrace(PTRACE_PEEKTEXT, proc->pid, addr + offset, 0);
+			if (a.a == -1 && errno) {
+				if (started && errno == EIO)
+					return bytes_written;
+				else
+					return -1;
+			}
+			memcpy(&a.c[0], laddr + offset, len - offset);
+		}
+
+		a.a = ptrace(PTRACE_POKETEXT, proc->pid, addr + offset, a.a);
+		if (a.a == -1 && errno) {
+			if (started && errno == EIO)
+				return bytes_written;
+			else
+				return -1;
+		}
+
+		if (len - offset >= sizeof(long))
+			bytes_written += sizeof(long);
+		else
+			bytes_written += len - offset;
+
+		started = 1;
+
+		offset += sizeof(long);
+	}
+
+	return bytes_written;
 }

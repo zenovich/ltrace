@@ -25,6 +25,8 @@ extern char * command;
 
 extern int exiting;  /* =1 if we have to exit ASAP */
 
+extern int opt_fake_return;
+
 typedef struct Breakpoint Breakpoint;
 struct Breakpoint {
 	void * addr;
@@ -54,6 +56,8 @@ enum arg_type {
 	ARGTYPE_FORMAT,		/* printf-like format */
 	ARGTYPE_STRING,		/* NUL-terminated string */
 	ARGTYPE_STRING_N,	/* String of known maxlen */
+	ARGTYPE_BYTES,		/* Array of bytes */
+	ARGTYPE_BYTES_N,	/* Binary data of known maxlen */
 	ARGTYPE_ARRAY,		/* Series of values in memory */
 	ARGTYPE_ENUM,		/* Enumeration */
 	ARGTYPE_STRUCT,		/* Structure of values */
@@ -213,6 +217,7 @@ struct opt_c_struct {
 
 #include "options.h"
 #include "output.h"
+#include "mock.h"
 #ifdef USE_DEMANGLE
 #include "demangle.h"
 #endif
@@ -226,6 +231,7 @@ extern Process * pid2proc(pid_t pid);
 extern void handle_event(Event * event);
 extern void execute_program(Process *, char **);
 extern int display_arg(enum tof type, Process * proc, int arg_num, arg_type_info * info);
+extern long get_length(enum tof type, Process *proc, int len_spec, void *st, arg_type_info* st_info);
 extern Breakpoint * address2bpstruct(Process * proc, void * addr);
 extern void breakpoints_init(Process * proc);
 extern void insert_breakpoint(Process * proc, void * addr, struct library_symbol * libsym);
@@ -254,6 +260,7 @@ extern void trace_me(void);
 extern int trace_pid(pid_t pid);
 extern void untrace_pid(pid_t pid);
 extern void get_arch_dep(Process * proc);
+extern void set_arch_dep(Process * proc);
 extern void * get_instruction_pointer(Process * proc);
 extern void set_instruction_pointer(Process * proc, void * addr);
 extern void * get_stack_pointer(Process * proc);
@@ -267,10 +274,12 @@ extern void continue_after_signal(pid_t pid, int signum);
 extern void continue_after_breakpoint(Process * proc, Breakpoint * sbp);
 extern void continue_enabling_breakpoint(pid_t pid, Breakpoint * sbp);
 extern long gimme_arg(enum tof type, Process * proc, int arg_num, arg_type_info * info);
+extern void set_arg(enum tof type, Process * proc, int arg_num, arg_type_info * info, long value);
 extern void save_register_args(enum tof type, Process * proc);
 extern int umovestr(Process * proc, void * addr, int len, void * laddr);
 extern int umovelong (Process * proc, void * addr, long * result, arg_type_info * info);
 extern size_t umovebytes (Process *proc, void * addr, void * laddr, size_t count);
+extern size_t uunmovebytes (Process *proc, void * addr, void * laddr, size_t count);
 extern int ffcheck(void * maddr);
 extern void * sym2addr(Process *, struct library_symbol *);
 extern int linkmap_init(Process *, struct ltelf *);

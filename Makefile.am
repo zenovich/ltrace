@@ -22,6 +22,7 @@ libltrace_la_SOURCES = \
 	libltrace.c \
 	options.c \
 	output.c \
+	mock.c \
 	proc.c \
 	read_config_file.c  \
 	summary.c
@@ -60,6 +61,8 @@ noinst_HEADERS = \
 
 dist_man1_MANS = \
 	ltrace.1
+
+docdir = ${datadir}/doc/${PACKAGE}
 
 dist_doc_DATA = \
 	COPYING \

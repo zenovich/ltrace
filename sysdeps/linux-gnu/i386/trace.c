@@ -21,6 +21,10 @@ void
 get_arch_dep(Process *proc) {
 }
 
+void
+set_arch_dep(Process *proc) {
+}
+
 /* Returns 1 if syscall, 2 if sysret, 0 otherwise.
  */
 int
@@ -78,6 +82,26 @@ gimme_arg(enum tof type, Process *proc, int arg_num, arg_type_info *info) {
 	}
 
 	return 0;
+}
+
+void
+set_arg(enum tof type, Process *proc, int arg_num, arg_type_info *info, long value) {
+	if (arg_num == -1) {	/* return value */
+		ptrace(PTRACE_POKEUSER, proc->pid, 4 * EAX, value);
+		return;
+	}
+
+	if (type == LT_TOF_FUNCTION || type == LT_TOF_FUNCTIONR) {
+			ptrace(PTRACE_POKETEXT, proc->pid,
+			      proc->stack_pointer + 4 * (arg_num + 1), value);
+		return;
+	} else if (type == LT_TOF_SYSCALL || type == LT_TOF_SYSCALLR) {
+		ptrace(PTRACE_POKEUSER, proc->pid, 4 * arg_num, value);
+		return;
+	} else {
+		fprintf(stderr, "set_arg called with wrong arguments\n");
+		exit(1);
+	}
 }
 
 void

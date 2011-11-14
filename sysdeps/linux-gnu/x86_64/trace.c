@@ -38,6 +38,19 @@ get_arch_dep(Process *proc) {
 	}
 }
 
+void
+set_arch_dep(Process *proc)
+{
+	proc_archdep *a;
+
+	a = (proc_archdep *) (proc->arch_ptr);
+	if (!a || !a->valid)
+		return;
+
+	ptrace(PTRACE_SETREGS, proc->pid, 0, &a->regs);
+	ptrace(PTRACE_GETFPREGS, proc->pid, 0, &a->fpregs);
+}
+
 /* Returns 1 if syscall, 2 if sysret, 0 otherwise.
  */
 int
@@ -94,6 +107,48 @@ gimme_arg32(enum tof type, Process *proc, int arg_num) {
 	exit(1);
 }
 
+static void
+set_arg32(enum tof type, Process *proc, int arg_num, unsigned int value) {
+	proc_archdep *a = (proc_archdep *) proc->arch_ptr;
+
+	if (arg_num == -1) {	/* return value */
+		a->regs.rax = value;
+		return;
+	}
+
+	if (type == LT_TOF_FUNCTION || type == LT_TOF_FUNCTIONR) {
+		ptrace(PTRACE_POKETEXT, proc->pid,
+			      proc->stack_pointer + 4 * (arg_num + 1), &value);
+		return;
+	} else if (type == LT_TOF_SYSCALL || type == LT_TOF_SYSCALLR) {
+		switch (arg_num) {
+		case 0:
+			a->regs.rbx = value;
+			return;
+		case 1:
+			a->regs.rcx = value;
+			return;
+		case 2:
+			a->regs.rdx = value;
+			return;
+		case 3:
+			a->regs.rsi = value;
+			return;
+		case 4:
+			a->regs.rdi = value;
+			return;
+		case 5:
+			a->regs.rbp = value;
+			return;
+		default:
+			fprintf(stderr,
+				"set_arg32 called with wrong arguments\n");
+			exit(2);
+		}
+	}
+	fprintf(stderr, "set_arg called with wrong arguments\n");
+	exit(1);
+}
 static long
 gimme_arg_regset(Process *proc, int arg_num, arg_type_info *info,
                  struct user_regs_struct *regs,
@@ -130,14 +185,70 @@ gimme_arg_regset(Process *proc, int arg_num, arg_type_info *info,
 			      proc->stack_pointer + 8 * (arg_num - 6 + 1), 0);
 	}
 }
+
+static void
+set_arg_regset(Process *proc, int arg_num, arg_type_info *info,
+                 struct user_regs_struct *regs,
+		 struct user_fpregs_struct *fpregs, long value)
+{
+        union {
+		uint32_t sse[4];
+		long lval;
+		float fval;
+		double dval;
+	} cvt;
+
+	cvt.lval = value;
+
+        if (info->type == ARGTYPE_FLOAT || info->type == ARGTYPE_DOUBLE) {
+		memcpy(fpregs->xmm_space + 4*arg_num, cvt.sse,
+		       sizeof(cvt.sse));
+		return;
+	}
+
+	switch (arg_num) {
+	case 0:
+		regs->rdi = value;
+		break;
+	case 1:
+		regs->rsi = value;
+		break;
+	case 2:
+		regs->rdx = value;
+		break;
+	case 3:
+		regs->rcx = value;
+		break;
+	case 4:
+		regs->r8 = value;
+		break;
+	case 5:
+		regs->r9 = value;
+		break;
+	default:
+		ptrace(PTRACE_POKETEXT, proc->pid,
+		      proc->stack_pointer + 8 * (arg_num - 6 + 1), &value);
+	}
+}
+
 static long
 gimme_retval(Process *proc, int arg_num, arg_type_info *info,
              struct user_regs_struct *regs, struct user_fpregs_struct *fpregs)
 {
-        if (info->type == ARGTYPE_FLOAT || info->type == ARGTYPE_DOUBLE)
+	if (info->type == ARGTYPE_FLOAT || info->type == ARGTYPE_DOUBLE)
 		return gimme_arg_regset(proc, 0, info, regs, fpregs);
 	else
 		return regs->rax;
+}
+
+static void
+set_retval(Process *proc, int arg_num, arg_type_info *info,
+             struct user_regs_struct *regs, struct user_fpregs_struct *fpregs, long value)
+{
+	if (info->type == ARGTYPE_FLOAT || info->type == ARGTYPE_DOUBLE)
+		set_arg_regset(proc, 0, info, regs, fpregs, value);
+	else
+		regs->rax = value;
 }
 
 long
@@ -170,10 +281,43 @@ gimme_arg(enum tof type, Process *proc, int arg_num, arg_type_info *info) {
 }
 
 void
-save_register_args(enum tof type, Process *proc) {
-        proc_archdep *arch = (proc_archdep *)proc->arch_ptr;
-        if (arch == NULL || !arch->valid)
-                return;
+set_arg(enum tof type, Process *proc, int arg_num, arg_type_info *info, long value)
+{
+	if (proc->mask_32bit) {
+		set_arg32(type, proc, arg_num, value);
+		return;
+	}
+
+	proc_archdep *arch = (proc_archdep *)proc->arch_ptr;
+
+	if (arch == NULL || !arch->valid)
+		return;
+
+	if (type == LT_TOF_FUNCTIONR) {
+		if (arg_num == -1)
+			return set_retval(proc, arg_num, info,
+					  &arch->regs, &arch->fpregs, value);
+		else {
+			struct callstack_element *elem
+				= proc->callstack + proc->callstack_depth - 1;
+			callstack_achdep *csad = elem->arch_ptr;
+			assert(csad != NULL);
+			return set_arg_regset(proc, arg_num, info,
+						  &csad->regs_copy,
+						  &csad->fpregs_copy, value);
+		}
+	}
+	else
+		return set_arg_regset(proc, arg_num, info,
+					&arch->regs, &arch->fpregs, value);
+}
+
+void
+save_register_args(enum tof type, Process *proc)
+{
+	proc_archdep *arch = (proc_archdep *)proc->arch_ptr;
+	if (arch == NULL || !arch->valid)
+		return;
 
 	callstack_achdep *csad = malloc(sizeof(*csad));
 	memset(csad, 0, sizeof(*csad));

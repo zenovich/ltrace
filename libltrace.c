@@ -9,6 +9,10 @@
 #include <signal.h>
 #include <sys/wait.h>
 
+#ifdef HAVE_PYTHON
+#include "Python.h"
+#endif
+
 #include "common.h"
 
 char *command = NULL;
@@ -68,11 +72,18 @@ normal_exit(void) {
 		fclose(options.output);
 		options.output = NULL;
 	}
+#ifdef HAVE_PYTHON
+	Py_Finalize();
+#endif
 }
 
 void
 ltrace_init(int argc, char **argv) {
 	struct opt_p_t *opt_p_tmp;
+
+#ifdef HAVE_PYTHON
+	Py_Initialize();
+#endif
 
 	atexit(normal_exit);
 	signal(SIGINT, signal_exit);	/* Detach processes when interrupted */
@@ -130,7 +141,7 @@ static void
 dispatch_callbacks(Event * ev) {
 	int i;
 	/* Ignoring case 1: signal into a dying tracer */
-	if (ev->type==EVENT_SIGNAL && 
+	if (ev->type==EVENT_SIGNAL &&
 			exiting && ev->e_un.signum == SIGSTOP) {
 		return;
 	}

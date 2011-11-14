@@ -18,7 +18,7 @@ static int display_format(enum tof type, Process *proc, int arg_num);
 static size_t string_maxlength = INT_MAX;
 static size_t array_maxlength = INT_MAX;
 
-static long
+long
 get_length(enum tof type, Process *proc, int len_spec,
 		       void *st, arg_type_info* st_info) {
 	long len;
@@ -216,9 +216,11 @@ display_value(enum tof type, Process *proc,
 		fprintf(stderr, "Should never encounter a format anywhere but at the top level (for now?)\n");
 		exit(1);
 	case ARGTYPE_STRING:
+	case ARGTYPE_BYTES:
 		return display_string(type, proc, (void*) value,
 				      string_maxlength);
 	case ARGTYPE_STRING_N:
+	case ARGTYPE_BYTES_N:
 		return display_string(type, proc, (void*) value,
 				      get_length(type, proc,
 						 info->u.string_n_info.size_spec, st, st_info));

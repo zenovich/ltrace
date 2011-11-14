@@ -1,3 +1,5 @@
+m4_include([m4/as-python.m4])
+
 # -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
 AC_PREREQ(2.59)
@@ -65,6 +67,14 @@ AC_CHECK_LIB([elf], [elf_begin],,
 CPPFLAGS="${saved_CPPFLAGS}"
 LDFLAGS="${saved_LDFLAGS}"
 
+#Python
+AS_PATH_PYTHON([2.6.0])
+AM_CHECK_PYTHON_HEADERS([AM_CPPFLAGS="$AM_CPPFLAGS $PYTHON_INCLUDES"],[AC_MSG_NOTICE([could not find Python headers])])
+AM_CHECK_PYTHON_LIBS(
+	[
+		AC_DEFINE([HAVE_PYTHON], [1], [we have python])
+		AM_LDFLAGS="${AM_LDFLAGS} $PYTHON_LIBS"
+	],[AC_MSG_NOTICE([could not find Python libs])])
 
 # HAVE_LIBIBERTY
 AC_CHECK_LIB([iberty], [cplus_demangle], [
@@ -109,7 +119,7 @@ case "${enable_libunwind}" in
     enable_libunwind=no
   else
     AC_MSG_RESULT([$enable_libunwind])
-    AC_MSG_ERROR([libunwind.h or libunwind-ptrace.h cannot be found])	
+    AC_MSG_ERROR([libunwind.h or libunwind-ptrace.h cannot be found])
   fi
   ;;
 (*) ;;
@@ -243,6 +253,8 @@ AC_ARG_ENABLE([werror],
 if test x$enable_werror = xyes; then
     AM_CFLAGS="${AM_CFLAGS} -Werror"
 fi
+
+AM_LDFLAGS="${AM_LDFLAGS} -lrt"
 
 AC_SUBST(AM_CPPFLAGS)
 AC_SUBST(AM_CFLAGS)

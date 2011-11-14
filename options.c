@@ -10,7 +10,12 @@
 
 #include <getopt.h>
 
+#ifdef HAVE_PYTHON
+#include <Python.h>
+#endif
+
 #include "common.h"
+#include <time.h>
 
 #ifndef SYSCONFDIR
 #define SYSCONFDIR "/etc"
@@ -40,6 +45,9 @@ char *library[MAX_LIBRARIES];
 size_t library_num = 0;
 static char *progname;		/* Program name (`ltrace') */
 int opt_i = 0;			/* instruction pointer */
+int opt_q = 0;			/* quick time travel */
+int opt_fake_return = 0;	/* fake return values */
+time_t opt_q_time;		/* travel from ts*/
 int opt_r = 0;			/* print relative timestamp */
 int opt_t = 0;			/* print absolute timestamp */
 int opt_T = 0;			/* show the time spent inside each call */
@@ -50,6 +58,9 @@ struct opt_p_t *opt_p = NULL;	/* attach to process with a given pid */
 /* List of function names given to option -e: */
 struct opt_e_t *opt_e = NULL;
 int opt_e_enable = 1;
+
+/* List of function names and values given to option -m: */
+struct opt_m_t *opt_m = NULL;
 
 /* List of global function names given to -x: */
 struct opt_x_t *opt_x = NULL;
@@ -91,6 +102,10 @@ usage(void) {
 		"  -i                  print instruction pointer at time of library call.\n"
 		"  -l, --library=FILE  print library calls from this library only.\n"
 		"  -L                  do NOT display library calls.\n"
+		"  -m expr             mock result values of functions (func1=val1,...).\n"
+#ifdef HAVE_PYTHON
+		"  -M, --wrappers=FILE python file with result-wrapper functions (named like 'func1_wrapper').\n"
+#endif
 		"  -n, --indent=NR     indent output by NR spaces for each call level nesting.\n"
 		"  -o, --output=FILE   write the trace output to that file.\n"
 		"  -p PID              attach to the process with the process ID pid.\n"
@@ -99,6 +114,7 @@ usage(void) {
 		"  -S                  display system calls.\n"
 		"  -t, -tt, -ttt       print absolute timestamps.\n"
 		"  -T                  show the time spent inside each call.\n"
+		"  -q, --travel=ts     quick time travel.\n"
 		"  -u USERNAME         run command with the userid, groupid of username.\n"
 		"  -V, --version       output version information and exit.\n"
 #if defined(HAVE_LIBUNWIND)
@@ -115,7 +131,7 @@ usage(void) {
 static void
 usage_debug(void) {
 	fprintf(stdout, "%s debugging option, --debug=<octal> or -D<octal>:\n", progname);
-	fprintf(stdout, 
+	fprintf(stdout,
 			"\n"
 			" number  ref. in source   description\n"
 			"      1   general           Generally helpful progress information\n"
@@ -207,7 +223,11 @@ process_options(int argc, char **argv) {
 			{"indent", 1, 0, 'n'},
 			{"help", 0, 0, 'h'},
 			{"library", 1, 0, 'l'},
+#ifdef HAVE_PYTHON
+			{"wrappers", 1, 0, 'M'},
+#endif
 			{"output", 1, 0, 'o'},
+			{"travel", 1, 0, 'q'},
 			{"version", 0, 0, 'V'},
 			{"no-plt", 0, 0, 'g'},
 			{"no-signals", 0, 0, 'b'},
@@ -220,11 +240,10 @@ process_options(int argc, char **argv) {
 # ifdef USE_DEMANGLE
 				"C"
 # endif
-#if defined(HAVE_LIBUNWIND)
-				"a:A:D:e:F:l:n:o:p:s:u:x:X:w:", long_options,
-#else /* !defined(HAVE_LIBUNWIND) */
-				"a:A:D:e:F:l:n:o:p:s:u:x:X:", long_options,
+#ifdef HAVE_LIBUNWIND
+				"w:"
 #endif
+				"a:A:D:e:F:l:m:M:n:o:p:q:s:u:x:X:", long_options,
 				&option_index);
 		if (c == -1) {
 			break;
@@ -327,6 +346,61 @@ process_options(int argc, char **argv) {
 		case 'L':
 			options.libcalls = 0;
 			break;
+		case 'm':
+			{
+				char *str_m = strdup(optarg);
+				if (!str_m) {
+					perror("ltrace: strdup");
+					exit(1);
+				}
+				while (*str_m) {
+					struct opt_m_t *tmp;
+					char *str2 = strchr(str_m, ',');
+					if (str2) {
+						*str2 = '\0';
+					}
+					char *streq = strchr(str_m, '=');
+					if (streq) {
+						*streq = '\0';
+					}
+					tmp = malloc(sizeof(struct opt_m_t));
+					if (!tmp) {
+						perror("ltrace: malloc");
+						exit(1);
+					}
+					tmp->name = str_m;
+					tmp->next = opt_m;
+					tmp->value = streq ? streq+1 : NULL;
+					opt_m = tmp;
+					if (str2) {
+						str_m = str2 + 1;
+					} else {
+						break;
+					}
+				}
+				break;
+			}
+#ifdef HAVE_PYTHON
+		case 'M':
+			{
+				FILE *wrfile = fopen(optarg, "r");
+				if (!wrfile) {
+					fprintf(stderr, "Can't open file with python wrappers for reading: %s\n", optarg);
+					exit(1);
+				}
+
+				int result = PyRun_SimpleFile(wrfile, optarg);
+				fclose(wrfile);
+
+				if (result != 0) {
+					fprintf(stderr, "Can't load mock module from '%s'\n", optarg);
+					exit(1);
+				}
+
+				opt_fake_return = 1;
+				break;
+			}
+#endif
 		case 'n':
 			options.indent = atoi(optarg);
 			break;
@@ -353,6 +427,10 @@ process_options(int argc, char **argv) {
 				opt_p = tmp;
 				break;
 			}
+		case 'q':
+			opt_q++;
+			opt_q_time = atoi(optarg);
+			break;
 		case 'r':
 			opt_r++;
 			break;

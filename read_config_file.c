@@ -36,6 +36,7 @@ static struct list_of_pt_t {
 	"file", ARGTYPE_FILE}, {
 	"format", ARGTYPE_FORMAT}, {
 	"string", ARGTYPE_STRING}, {
+	"bytes", ARGTYPE_BYTES}, {
 	"array", ARGTYPE_ARRAY}, {
 	"struct", ARGTYPE_STRUCT}, {
 	"enum", ARGTYPE_ENUM}, {
@@ -62,6 +63,8 @@ static arg_type_info arg_type_prototypes[] = {
 	{ ARGTYPE_FORMAT },
 	{ ARGTYPE_STRING },
 	{ ARGTYPE_STRING_N },
+	{ ARGTYPE_BYTES },
+	{ ARGTYPE_BYTES_N },
 	{ ARGTYPE_ARRAY },
 	{ ARGTYPE_ENUM },
 	{ ARGTYPE_STRUCT },
@@ -330,6 +333,8 @@ arg_align(arg_type_info * arg) {
 		case ARGTYPE_FORMAT:
 		case ARGTYPE_STRING:
 		case ARGTYPE_STRING_N:
+		case ARGTYPE_BYTES:
+		case ARGTYPE_BYTES_N:
 		case ARGTYPE_POINTER:
 			return ptr_alignment;
 
@@ -483,6 +488,7 @@ parse_nonpointer_type(char **str) {
 		return info;
 	}
 
+	case ARGTYPE_BYTES:
 	case ARGTYPE_STRING:
 		if (!isdigit(**str) && **str != '[') {
 			/* Oops, was just a simple string after all */
@@ -490,7 +496,7 @@ parse_nonpointer_type(char **str) {
 			return simple;
 		}
 
-		info->type = ARGTYPE_STRING_N;
+		info->type = (info->type == ARGTYPE_STRING) ? ARGTYPE_STRING_N : ARGTYPE_BYTES_N;
 
 		/* Backwards compatibility for string0, string1, ... */
 		if (isdigit(**str)) {

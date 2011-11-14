@@ -95,7 +95,7 @@ begin_of_line(enum tof type, Process *proc) {
 	}
 }
 
-static Function *
+Function *
 name2func(char *name) {
 	Function *tmp;
 	const char *str1, *str2;
@@ -202,8 +202,9 @@ output_left(enum tof type, Process *proc, char *function_name) {
 				current_column += fprintf(options.output, ", ");
 			}
 		}
-		if (func->params_right
+		if (opt_fake_return || func->params_right
 		    || func->return_info->type == ARGTYPE_STRING_N
+		    || func->return_info->type == ARGTYPE_BYTES_N
 		    || func->return_info->type == ARGTYPE_ARRAY) {
 			save_register_args(type, proc);
 		}
@@ -266,7 +267,6 @@ output_right(enum tof type, Process *proc, char *function_name) {
 		    fprintf(options.output, "<... %s resumed> ", function_name);
 #endif
 	}
-
 	if (!func) {
 		current_column += fprintf(options.output, ") ");
 		tabto(options.align - 1);

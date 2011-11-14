@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <sys/types.h>
+#include <time.h>
 
 struct options_t {
 	int align;      /* -a: default alignment column for results */
@@ -23,6 +24,8 @@ struct options_t {
 extern struct options_t options;
 
 extern int opt_i;		/* instruction pointer */
+extern int opt_q;		/* quick time travel */
+extern time_t opt_q_time;	/* quick time travel */
 extern int opt_r;		/* print relative timestamp */
 extern int opt_t;		/* print absolute timestamp */
 extern int opt_T;		/* show the time spent inside each call */
@@ -35,6 +38,12 @@ struct opt_p_t {
 struct opt_e_t {
 	char *name;
 	struct opt_e_t *next;
+};
+
+struct opt_m_t {
+	char *name;
+	char *value;
+	struct opt_m_t *next;
 };
 
 struct opt_F_t {
@@ -53,6 +62,8 @@ extern struct opt_p_t *opt_p;	/* attach to process with a given pid */
 
 extern struct opt_e_t *opt_e;	/* list of function names to display */
 extern int opt_e_enable;	/* 0 if '!' is used, 1 otherwise */
+
+extern struct opt_m_t *opt_m;	/* list of function to mock result */
 
 extern struct opt_F_t *opt_F;	/* alternate configuration file(s) */
 

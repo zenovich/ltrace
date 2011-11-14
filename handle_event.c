@@ -605,6 +605,8 @@ handle_breakpoint(Event *event) {
 			}
 			event->proc->return_addr = event->e_un.brk_addr;
 			if (event->proc->state != STATE_IGNORED) {
+				mock_return(LT_TOF_FUNCTIONR, event->proc,
+						event->proc->callstack[i].c_un.libfunc->name);
 				output_right(LT_TOF_FUNCTIONR, event->proc,
 						event->proc->callstack[i].c_un.libfunc->name);
 			}

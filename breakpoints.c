@@ -194,6 +194,11 @@ breakpoints_init(Process *proc) {
 					}
 					tmp2 = tmp2->next;
 				}
+
+				if (opt_q && !keep && (!strcmp((*tmp1)->name, "time") || !strcmp((*tmp1)->name, "gettimeofday") || !strcmp((*tmp1)->name, "clock_gettime"))) {
+					keep = 1;
+				}
+
 				if (!keep) {
 					*tmp1 = (*tmp1)->next;
 				} else {
