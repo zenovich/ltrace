@@ -189,7 +189,7 @@ dnl  AM_CHECK_PYTHON_HEADERS([ACTION-IF-POSSIBLE], [ACTION-IF-NOT-POSSIBLE])
 dnl function also defines PYTHON_INCLUDES
 AC_DEFUN([AM_CHECK_PYTHON_HEADERS],
  [
-  AM_PATH_PYTHON(,,[AC_MSG_NOTICE([could not find python])])
+  dnl AM_PATH_PYTHON(,,[AC_MSG_NOTICE([could not find python])])
   AC_MSG_CHECKING(for headers required to compile python extensions)
 
   dnl deduce PYTHON_INCLUDES

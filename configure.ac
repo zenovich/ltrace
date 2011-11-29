@@ -68,13 +68,26 @@ CPPFLAGS="${saved_CPPFLAGS}"
 LDFLAGS="${saved_LDFLAGS}"
 
 #Python
-AS_PATH_PYTHON([2.6.0])
-AM_CHECK_PYTHON_HEADERS([AM_CPPFLAGS="$AM_CPPFLAGS $PYTHON_INCLUDES"],[AC_MSG_NOTICE([could not find Python headers])])
-AM_CHECK_PYTHON_LIBS(
-	[
-		AC_DEFINE([HAVE_PYTHON], [1], [we have python])
-		AM_LDFLAGS="${AM_LDFLAGS} $PYTHON_LIBS"
-	],[AC_MSG_NOTICE([could not find Python libs])])
+AM_PATH_PYTHON([2.4.0],[
+	AM_CHECK_PYTHON_LIBS(
+		[
+			AM_LDFLAGS="${AM_LDFLAGS} $PYTHON_LIBS"
+			AM_CHECK_PYTHON_HEADERS(
+				[
+					AC_DEFINE([HAVE_PYTHON], [1], [we have python])
+					AM_CPPFLAGS="$AM_CPPFLAGS $PYTHON_INCLUDES"
+				],
+				[
+					AC_MSG_NOTICE([could not find Python headers])
+				]
+			)
+		],
+		[
+			AC_MSG_NOTICE([could not find Python libs])
+		]
+	)
+	]
+)
 
 # HAVE_LIBIBERTY
 AC_CHECK_LIB([iberty], [cplus_demangle], [
