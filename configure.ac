@@ -68,7 +68,7 @@ CPPFLAGS="${saved_CPPFLAGS}"
 LDFLAGS="${saved_LDFLAGS}"
 
 #Python
-AM_PATH_PYTHON([2.4.0],[
+AS_PATH_PYTHON([2.6.0],[ # Byte-arrays were introduced in version 2.6
 	AM_CHECK_PYTHON_LIBS(
 		[
 			AM_LDFLAGS="${AM_LDFLAGS} $PYTHON_LIBS"
@@ -86,7 +86,8 @@ AM_PATH_PYTHON([2.4.0],[
 			AC_MSG_NOTICE([could not find Python libs])
 		]
 	)
-	]
+	],
+	[AC_MSG_NOTICE([could not find python version >= 2.6])]
 )
 
 # HAVE_LIBIBERTY

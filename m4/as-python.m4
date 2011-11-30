@@ -40,7 +40,7 @@ AC_DEFUN([AS_PATH_PYTHON],
 
   dnl should we do the version check?
   ifelse([$1],[],
-         [AC_PATH_PROG(PYTHON, python python2.5 python2.4 python2.3 python2.2 python2.6 python2.7 python2.8 python2.9 python3.0 python3.1 python3.2)],
+         [AC_PATH_PROG(PYTHON, python python3.2 python3.1 python3.0 python2.9 python2.8 python2.7 python2.6 python2.5 python2.4 python2.3 python2.2)],
          [
      AC_MSG_NOTICE(Looking for Python version >= $1)
     changequote(<<, >>)dnl
@@ -75,6 +75,7 @@ else:
 
   if test "$python_good" != "true"; then
     AC_MSG_RESULT([No suitable version of python found])
+    $3
   else
 
     AC_MSG_CHECKING([local Python configuration])
@@ -138,6 +139,7 @@ else:
     pkgpyexecdir=\${pyexecdir}/$PACKAGE
 
     AC_MSG_RESULT([looks good])
+    $2
   fi
 ])
 
