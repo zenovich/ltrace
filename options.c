@@ -1,5 +1,9 @@
 #include "config.h"
 
+#ifdef HAVE_PYTHON
+#include <Python.h>
+#endif
+
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -9,11 +13,6 @@
 #include <sys/ioctl.h>
 
 #include <getopt.h>
-
-#ifdef HAVE_PYTHON
-#include <Python.h>
-#endif
-
 #include "common.h"
 #include <time.h>
 

@@ -1,5 +1,9 @@
 #include "config.h"
 
+#ifdef HAVE_PYTHON
+#include "Python.h"
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -8,10 +12,6 @@
 #include <sys/param.h>
 #include <signal.h>
 #include <sys/wait.h>
-
-#ifdef HAVE_PYTHON
-#include "Python.h"
-#endif
 
 #include "common.h"
 
