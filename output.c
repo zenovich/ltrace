@@ -96,7 +96,7 @@ begin_of_line(enum tof type, Process *proc) {
 }
 
 Function *
-name2func(char *name) {
+name2func(char const *name) {
 	Function *tmp;
 	const char *str1, *str2;
 
@@ -153,7 +153,7 @@ tabto(int col) {
 }
 
 void
-output_left(enum tof type, Process *proc, char *function_name) {
+output_left(enum tof type, Process *proc, char const *function_name) {
 	Function *func;
 	static arg_type_info *arg_unknown = NULL;
 	if (arg_unknown == NULL)
@@ -168,7 +168,6 @@ output_left(enum tof type, Process *proc, char *function_name) {
 	}
 	current_proc = proc;
 	current_depth = proc->callstack_depth;
-	proc->type_being_displayed = type;
 	begin_of_line(type, proc);
 #ifdef USE_DEMANGLE
 	current_column +=

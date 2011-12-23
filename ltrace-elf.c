@@ -14,7 +14,6 @@
 
 #include "common.h"
 
-void do_init_elf(struct ltelf *lte, const char *filename);
 void do_close_elf(struct ltelf *lte);
 void add_library_symbol(GElf_Addr addr, const char *name,
 		struct library_symbol **library_symbolspp,
@@ -136,18 +135,14 @@ static GElf_Addr get_glink_vma(struct ltelf *lte, GElf_Addr ppcgot,
 	return 0;
 }
 
-void
-do_init_elf(struct ltelf *lte, const char *filename) {
-	int i;
-	GElf_Addr relplt_addr = 0;
-	size_t relplt_size = 0;
-
-	debug(DEBUG_FUNCTION, "do_init_elf(filename=%s)", filename);
-	debug(1, "Reading ELF from %s...", filename);
-
+int
+open_elf(struct ltelf *lte, const char *filename)
+{
 	lte->fd = open(filename, O_RDONLY);
 	if (lte->fd == -1)
-		error(EXIT_FAILURE, errno, "Can't open \"%s\"", filename);
+		return 1;
+
+	elf_version(EV_CURRENT);
 
 #ifdef HAVE_ELF_C_READ_MMAP
 	lte->elf = elf_begin(lte->fd, ELF_C_READ_MMAP, NULL);
@@ -180,6 +175,21 @@ do_init_elf(struct ltelf *lte, const char *filename) {
 	    )
 		error(EXIT_FAILURE, 0,
 		      "\"%s\" is ELF from incompatible architecture", filename);
+
+	return 0;
+}
+
+int
+do_init_elf(struct ltelf *lte, const char *filename) {
+	int i;
+	GElf_Addr relplt_addr = 0;
+	size_t relplt_size = 0;
+
+	debug(DEBUG_FUNCTION, "do_init_elf(filename=%s)", filename);
+	debug(1, "Reading ELF from %s...", filename);
+
+	if (open_elf(lte, filename) < 0)
+		return -1;
 
 	Elf_Data *plt_data = NULL;
 	GElf_Addr ppcgot = 0;
@@ -454,6 +464,7 @@ do_init_elf(struct ltelf *lte, const char *filename) {
 
 		debug(1, "%s %zd PLT relocations", filename, lte->relplt_count);
 	}
+	return 0;
 }
 
 void
@@ -465,28 +476,74 @@ do_close_elf(struct ltelf *lte) {
 	close(lte->fd);
 }
 
+static struct library_symbol *
+create_library_symbol(const char * name, GElf_Addr addr)
+{
+	size_t namel = strlen(name) + 1;
+	struct library_symbol * sym = calloc(sizeof(*sym) + namel, 1);
+	if (sym == NULL) {
+		perror("create_library_symbol");
+		return NULL;
+	}
+	sym->name = (char *)(sym + 1);
+	memcpy(sym->name, name, namel);
+	sym->enter_addr = (void *)(uintptr_t) addr;
+	return sym;
+}
+
 void
 add_library_symbol(GElf_Addr addr, const char *name,
 		   struct library_symbol **library_symbolspp,
-		   enum toplt type_of_plt, int is_weak) {
+		   enum toplt type_of_plt, int is_weak)
+{
 	struct library_symbol *s;
 
 	debug(DEBUG_FUNCTION, "add_library_symbol()");
 
-	s = malloc(sizeof(struct library_symbol) + strlen(name) + 1);
+	s = create_library_symbol(name, addr);
 	if (s == NULL)
 		error(EXIT_FAILURE, errno, "add_library_symbol failed");
 
 	s->needs_init = 1;
 	s->is_weak = is_weak;
 	s->plt_type = type_of_plt;
+
 	s->next = *library_symbolspp;
-	s->enter_addr = (void *)(uintptr_t) addr;
-	s->name = (char *)(s + 1);
-	strcpy(s->name, name);
 	*library_symbolspp = s;
 
 	debug(2, "addr: %p, symbol: \"%s\"", (void *)(uintptr_t) addr, name);
+}
+
+struct library_symbol *
+clone_library_symbol(struct library_symbol * sym)
+{
+	struct library_symbol * copy
+		= create_library_symbol(sym->name,
+					(GElf_Addr)(uintptr_t)sym->enter_addr);
+	if (copy == NULL)
+		return NULL;
+
+	copy->needs_init = sym->needs_init;
+	copy->is_weak = sym->is_weak;
+	copy->plt_type = sym->plt_type;
+
+	return copy;
+}
+
+void
+destroy_library_symbol(struct library_symbol * sym)
+{
+	free(sym);
+}
+
+void
+destroy_library_symbol_chain(struct library_symbol * sym)
+{
+	while (sym != NULL) {
+		struct library_symbol * next = sym->next;
+		destroy_library_symbol(sym);
+		sym = next;
+	}
 }
 
 /* stolen from elfutils-0.123 */
@@ -621,9 +678,8 @@ read_elf(Process *proc) {
 	library_num = 0;
 	proc->libdl_hooked = 0;
 
-	elf_version(EV_CURRENT);
-
-	do_init_elf(lte, proc->filename);
+	if (do_init_elf(lte, proc->filename))
+		return NULL;
 
 	memcpy(&main_lte, lte, sizeof(struct ltelf));
 
@@ -635,7 +691,9 @@ read_elf(Process *proc) {
 	proc->e_machine = lte->ehdr.e_machine;
 
 	for (i = 0; i < library_num; ++i) {
-		do_init_elf(&lte[i + 1], library[i]);
+		if (do_init_elf(&lte[i + 1], library[i]))
+			error(EXIT_FAILURE, errno, "Can't open \"%s\"",
+			      library[i]);
 	}
 
 	if (!options.no_plt) {

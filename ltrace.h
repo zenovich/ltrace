@@ -9,6 +9,7 @@ enum Event_type {
 	EVENT_ARCH_SYSCALL,
 	EVENT_ARCH_SYSRET,
 	EVENT_CLONE,
+	EVENT_VFORK,
 	EVENT_EXEC,
 	EVENT_BREAKPOINT,
 	EVENT_LIBCALL,
@@ -20,6 +21,7 @@ enum Event_type {
 typedef struct Process Process;
 typedef struct Event Event;
 struct Event {
+	struct Event * next;
 	Process * proc;
 	Event_type type;
 	union {

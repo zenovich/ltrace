@@ -14,14 +14,24 @@
 
 Breakpoint *
 address2bpstruct(Process *proc, void *addr) {
+	assert(proc != NULL);
+	assert(proc->breakpoints != NULL);
+	assert(proc->leader == proc);
 	debug(DEBUG_FUNCTION, "address2bpstruct(pid=%d, addr=%p)", proc->pid, addr);
 	return dict_find_entry(proc->breakpoints, addr);
 }
 
 void
 insert_breakpoint(Process *proc, void *addr,
-		  struct library_symbol *libsym) {
+		  struct library_symbol *libsym, int enable) {
 	Breakpoint *sbp;
+
+	Process * leader = proc->leader;
+
+	/* Only the group leader should be getting the breakpoints and
+	 * thus have ->breakpoint initialized.  */
+	assert(leader != NULL);
+	assert(leader->breakpoints != NULL);
 
 #ifdef __arm__
 	int thumb_mode = (int)addr & 1;
@@ -38,13 +48,13 @@ insert_breakpoint(Process *proc, void *addr,
 	if (libsym)
 		libsym->needs_init = 0;
 
-	sbp = dict_find_entry(proc->breakpoints, addr);
+	sbp = dict_find_entry(leader->breakpoints, addr);
 	if (!sbp) {
 		sbp = calloc(1, sizeof(Breakpoint));
 		if (!sbp) {
 			return;	/* TODO FIXME XXX: error_mem */
 		}
-		dict_enter(proc->breakpoints, addr, sbp);
+		dict_enter(leader->breakpoints, addr, sbp);
 		sbp->addr = addr;
 		sbp->libsym = libsym;
 	}
@@ -53,8 +63,10 @@ insert_breakpoint(Process *proc, void *addr,
 	proc->thumb_mode = 0;
 #endif
 	sbp->enabled++;
-	if (sbp->enabled == 1 && proc->pid)
-		enable_breakpoint(proc->pid, sbp);
+	if (sbp->enabled == 1 && enable) {
+		assert(proc->pid != 0);
+		enable_breakpoint(proc, sbp);
+	}
 }
 
 void
@@ -63,7 +75,10 @@ delete_breakpoint(Process *proc, void *addr) {
 
 	debug(DEBUG_FUNCTION, "delete_breakpoint(pid=%d, addr=%p)", proc->pid, addr);
 
-	sbp = dict_find_entry(proc->breakpoints, addr);
+	Process * leader = proc->leader;
+	assert(leader != NULL);
+
+	sbp = dict_find_entry(leader->breakpoints, addr);
 	assert(sbp);		/* FIXME: remove after debugging has been done. */
 	/* This should only happen on out-of-memory conditions. */
 	if (sbp == NULL)
@@ -71,7 +86,7 @@ delete_breakpoint(Process *proc, void *addr) {
 
 	sbp->enabled--;
 	if (sbp->enabled == 0)
-		disable_breakpoint(proc->pid, sbp);
+		disable_breakpoint(proc, sbp);
 	assert(sbp->enabled >= 0);
 }
 
@@ -79,7 +94,7 @@ static void
 enable_bp_cb(void *addr, void *sbp, void *proc) {
 	debug(DEBUG_FUNCTION, "enable_bp_cb(pid=%d)", ((Process *)proc)->pid);
 	if (((Breakpoint *)sbp)->enabled) {
-		enable_breakpoint(((Process *)proc)->pid, sbp);
+		enable_breakpoint(proc, sbp);
 	}
 }
 
@@ -146,13 +161,14 @@ static void
 disable_bp_cb(void *addr, void *sbp, void *proc) {
 	debug(DEBUG_FUNCTION, "disable_bp_cb(pid=%d)", ((Process *)proc)->pid);
 	if (((Breakpoint *)sbp)->enabled) {
-		disable_breakpoint(((Process *)proc)->pid, sbp);
+		disable_breakpoint(proc, sbp);
 	}
 }
 
 void
 disable_all_breakpoints(Process *proc) {
 	debug(DEBUG_FUNCTION, "disable_all_breakpoints(pid=%d)", proc->pid);
+	assert(proc->leader == proc);
 	if (proc->breakpoints_enabled) {
 		debug(1, "Disabling breakpoints for pid %u...", proc->pid);
 		dict_apply_to_all(proc->breakpoints, disable_bp_cb, proc);
@@ -167,8 +183,9 @@ free_bp_cb(void *addr, void *sbp, void *data) {
 	free(sbp);
 }
 
-void
-breakpoints_init(Process *proc) {
+int
+breakpoints_init(Process *proc, int enable)
+{
 	struct library_symbol *sym;
 
 	debug(DEBUG_FUNCTION, "breakpoints_init(pid=%d)", proc->pid);
@@ -177,19 +194,34 @@ breakpoints_init(Process *proc) {
 		dict_clear(proc->breakpoints);
 		proc->breakpoints = NULL;
 	}
-	proc->breakpoints = dict_init(dict_key2hash_int, dict_key_cmp_int);
+
+	/* Only the thread group leader should hold the breakpoints.
+	 * (N.B. PID may be set to 0 temporarily when called by
+	 * handle_exec).  */
+	assert(proc->leader == proc);
+
+	proc->breakpoints = dict_init(dict_key2hash_int,
+				      dict_key_cmp_int);
+
+	destroy_library_symbol_chain(proc->list_of_symbols);
+	proc->list_of_symbols = NULL;
 
 	if (options.libcalls && proc->filename) {
-		/* FIXME: memory leak when called by exec(): */
 		proc->list_of_symbols = read_elf(proc);
+		if (proc->list_of_symbols == NULL) {
+			/* XXX leak breakpoints */
+			return -1;
+		}
+
 		if (opt_e) {
-			struct library_symbol **tmp1 = &(proc->list_of_symbols);
+			struct library_symbol **tmp1 = &proc->list_of_symbols;
 			while (*tmp1) {
 				struct opt_e_t *tmp2 = opt_e;
 				int keep = !opt_e_enable;
 
 				while (tmp2) {
-					if (!strcmp((*tmp1)->name, tmp2->name)) {
+					if (!strcmp((*tmp1)->name,
+						    tmp2->name)) {
 						keep = opt_e_enable;
 					}
 					tmp2 = tmp2->next;
@@ -206,15 +238,14 @@ breakpoints_init(Process *proc) {
 				}
 			}
 		}
-	} else {
-		proc->list_of_symbols = NULL;
 	}
-	for (sym = proc->list_of_symbols; sym; sym = sym->next) {
-		/* proc->pid==0 delays enabling. */
-		insert_breakpoint(proc, sym2addr(proc, sym), sym);
-	}
+
+	for (sym = proc->list_of_symbols; sym; sym = sym->next)
+		insert_breakpoint(proc, sym2addr(proc, sym), sym, enable);
+
 	proc->callstack_depth = 0;
 	proc->breakpoints_enabled = -1;
+	return 0;
 }
 
 void
@@ -227,8 +258,7 @@ reinitialize_breakpoints(Process *proc) {
 
 	while (sym) {
 		if (sym->needs_init) {
-			insert_breakpoint(proc, sym2addr(proc, sym),
-					  sym);
+			insert_breakpoint(proc, sym2addr(proc, sym), sym, 1);
 			if (sym->needs_init && !sym->is_weak) {
 				fprintf(stderr,
 					"could not re-initialize breakpoint for \"%s\" in file \"%s\"\n",

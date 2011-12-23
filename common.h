@@ -1,6 +1,7 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#include <config.h>
 #if defined(HAVE_LIBUNWIND)
 #include <libunwind.h>
 #endif /* defined(HAVE_LIBUNWIND) */
@@ -168,12 +169,32 @@ enum Process_State {
 	STATE_IGNORED  /* ignore this process (it's a fork and no -f was used) */
 };
 
+typedef struct Event_Handler Event_Handler;
+struct Event_Handler {
+	/* Event handler that overrides the default one.  Should
+	 * return NULL if the event was handled, otherwise the
+	 * returned event is passed to the default handler.  */
+	Event * (* on_event)(Event_Handler * self, Event * event);
+
+	/* Called when the event handler removal is requested.  */
+	void (* destroy)(Event_Handler * self);
+};
+
+/* XXX We would rather have this all organized a little differently,
+ * have Process for the whole group and Task for what's there for
+ * per-thread stuff.  But for now this is the less invasive way of
+ * structuring it.  */
 struct Process {
 	Process_State state;
 	Process * parent;         /* needed by STATE_BEING_CREATED */
 	char * filename;
 	pid_t pid;
+
+	/* Dictionary of breakpoints (which is a mapping
+	 * address->Breakpoint).  This is NULL for non-leader
+	 * processes.  */
 	Dict * breakpoints;
+
 	int breakpoints_enabled;  /* -1:not enabled yet, 0:disabled, 1:enabled */
 	int mask_32bit;           /* 1 if 64-bit ltrace is tracing 32-bit process */
 	unsigned int personality;
@@ -190,7 +211,6 @@ struct Process {
 	void * instruction_pointer;
 	void * stack_pointer;      /* To get return addr, args... */
 	void * return_addr;
-	Breakpoint * breakpoint_being_enabled;
 	void * arch_ptr;
 	short e_machine;
 	short need_to_reinitialize_breakpoints;
@@ -198,16 +218,28 @@ struct Process {
 	int thumb_mode;           /* ARM execution mode: 0: ARM, 1: Thumb */
 #endif
 
-	/* output: */
-	enum tof type_being_displayed;
-
 #if defined(HAVE_LIBUNWIND)
 	/* libunwind address space */
 	unw_addr_space_t unwind_as;
 	void *unwind_priv;
 #endif /* defined(HAVE_LIBUNWIND) */
 
+	/* Set in leader.  */
+	Event_Handler * event_handler;
+
+
+	/**
+	 * Process chaining.
+	 **/
 	Process * next;
+
+	/* LEADER points to the leader thread of the POSIX.1 process.
+	   If X->LEADER == X, then X is the leader thread and the
+	   Process structures chained by NEXT represent other threads,
+	   up until, but not including, the next leader thread.
+	   LEADER may be NULL after the leader has already exited.  In
+	   that case this process is waiting to be collected.  */
+	Process * leader;
 };
 
 struct opt_c_struct {
@@ -224,28 +256,67 @@ struct opt_c_struct {
 
 extern Dict * dict_opt_c;
 
-extern Process * list_of_processes;
+enum process_status {
+	ps_invalid,	/* Failure.  */
+	ps_stop,	/* Job-control stop.  */
+	ps_tracing_stop,
+	ps_sleeping,
+	ps_zombie,
+	ps_other,	/* Necessary other states can be added as needed.  */
+};
 
-extern Event * next_event(void);
+enum pcb_status {
+	pcb_stop, /* The iteration should stop.  */
+	pcb_cont, /* The iteration should continue.  */
+};
+
+/* Process list  */
 extern Process * pid2proc(pid_t pid);
+extern void add_process(Process * proc);
+extern void remove_process(Process * proc);
+extern void change_process_leader(Process * proc, Process * leader);
+extern Process *each_process(Process * start,
+			     enum pcb_status (* cb)(Process * proc, void * data),
+			     void * data);
+extern Process *each_task(Process * start,
+			  enum pcb_status (* cb)(Process * proc, void * data),
+			  void * data);
+
+/* Events  */
+enum ecb_status {
+	ecb_cont, /* The iteration should continue.  */
+	ecb_yield, /* The iteration should stop, yielding this
+		    * event.  */
+	ecb_deque, /* Like ecb_stop, but the event should be removed
+		    * from the queue.  */
+};
+extern Event * next_event(void);
+extern Event * each_qd_event(enum ecb_status (* cb)(Event * event, void * data),
+			     void * data);
+extern void enque_event(Event * event);
 extern void handle_event(Event * event);
-extern void execute_program(Process *, char **);
+
+extern void install_event_handler(Process * proc, Event_Handler * handler);
+extern void destroy_event_handler(Process * proc);
+
+extern pid_t execute_program(const char * command, char ** argv);
 extern int display_arg(enum tof type, Process * proc, int arg_num, arg_type_info * info);
 extern long get_length(enum tof type, Process *proc, int len_spec, void *st, arg_type_info* st_info);
 extern Breakpoint * address2bpstruct(Process * proc, void * addr);
-extern void breakpoints_init(Process * proc);
-extern void insert_breakpoint(Process * proc, void * addr, struct library_symbol * libsym);
+extern int breakpoints_init(Process * proc, int enable);
+extern void insert_breakpoint(Process * proc, void * addr,
+			      struct library_symbol * libsym, int enable);
 extern void delete_breakpoint(Process * proc, void * addr);
 extern void enable_all_breakpoints(Process * proc);
 extern void disable_all_breakpoints(Process * proc);
 extern void reinitialize_breakpoints(Process *);
 
-extern Process * open_program(char * filename, pid_t pid);
+extern Process * open_program(char * filename, pid_t pid, int init_breakpoints);
 extern void open_pid(pid_t pid);
 extern void show_summary(void);
 extern arg_type_info * lookup_prototype(enum arg_type at);
 
-extern void do_init_elf(struct ltelf *lte, const char *filename);
+extern int do_init_elf(struct ltelf *lte, const char *filename);
 extern void do_close_elf(struct ltelf *lte);
 extern int in_load_libraries(const char *name, struct ltelf *lte, size_t count, GElf_Sym *sym);
 extern struct library_symbol *library_symbols;
@@ -253,8 +324,16 @@ extern void add_library_symbol(GElf_Addr addr, const char *name,
 		struct library_symbol **library_symbolspp,
 		enum toplt type_of_plt, int is_weak);
 
+extern struct library_symbol * clone_library_symbol(struct library_symbol * s);
+extern void destroy_library_symbol(struct library_symbol * s);
+extern void destroy_library_symbol_chain(struct library_symbol * chain);
+
 /* Arch-dependent stuff: */
 extern char * pid2name(pid_t pid);
+extern pid_t process_leader(pid_t pid);
+extern int process_tasks(pid_t pid, pid_t **ret_tasks, size_t *ret_n);
+extern int process_stopped(pid_t pid);
+extern enum process_status process_status(pid_t pid);
 extern void trace_set_options(Process * proc, pid_t pid);
 extern void trace_me(void);
 extern int trace_pid(pid_t pid);
@@ -266,13 +345,15 @@ extern void set_instruction_pointer(Process * proc, void * addr);
 extern void * get_stack_pointer(Process * proc);
 extern void * get_return_addr(Process * proc, void * stack_pointer);
 extern void set_return_addr(Process * proc, void * addr);
-extern void enable_breakpoint(pid_t pid, Breakpoint * sbp);
-extern void disable_breakpoint(pid_t pid, const Breakpoint * sbp);
+extern void enable_breakpoint(Process * proc, Breakpoint * sbp);
+extern void disable_breakpoint(Process * proc, Breakpoint * sbp);
 extern int syscall_p(Process * proc, int status, int * sysnum);
 extern void continue_process(pid_t pid);
 extern void continue_after_signal(pid_t pid, int signum);
+extern void continue_after_syscall(Process *proc, int sysnum, int ret_p);
 extern void continue_after_breakpoint(Process * proc, Breakpoint * sbp);
-extern void continue_enabling_breakpoint(pid_t pid, Breakpoint * sbp);
+extern void continue_after_vfork(Process * proc);
+extern void ltrace_exiting(void);
 extern long gimme_arg(enum tof type, Process * proc, int arg_num, arg_type_info * info);
 extern void set_arg(enum tof type, Process * proc, int arg_num, arg_type_info * info, long value);
 extern void save_register_args(enum tof type, Process * proc);
@@ -284,6 +365,8 @@ extern int ffcheck(void * maddr);
 extern void * sym2addr(Process *, struct library_symbol *);
 extern int linkmap_init(Process *, struct ltelf *);
 extern void arch_check_dbg(Process *proc);
+extern int task_kill (pid_t pid, int sig);
+
 
 extern struct ltelf main_lte;
 

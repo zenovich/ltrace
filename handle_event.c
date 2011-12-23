@@ -7,6 +7,7 @@
 #include <signal.h>
 #include <assert.h>
 #include <sys/time.h>
+#include <errno.h>
 
 #include "common.h"
 
@@ -25,7 +26,6 @@ static void handle_clone(Event *event);
 static void handle_exec(Event *event);
 static void handle_breakpoint(Event *event);
 static void handle_new(Event *event);
-static void remove_proc(Process *proc);
 
 static void callstack_push_syscall(Process *proc, int sysnum);
 static void callstack_push_symfunc(Process *proc,
@@ -36,9 +36,49 @@ static char * shortsignal(Process *proc, int signum);
 static char * sysname(Process *proc, int sysnum);
 static char * arch_sysname(Process *proc, int sysnum);
 
+static Event *
+call_handler(Process * proc, Event * event)
+{
+	assert(proc != NULL);
+
+	Event_Handler * handler = proc->event_handler;
+	if (handler == NULL)
+		return event;
+
+	return (*handler->on_event) (handler, event);
+}
+
 void
 handle_event(Event *event) {
-	debug(DEBUG_FUNCTION, "handle_event(pid=%d, type=%d)", event->proc ? event->proc->pid : -1, event->type);
+	if (exiting == 1) {
+		exiting = 2;
+		debug(1, "ltrace about to exit");
+		ltrace_exiting();
+	}
+	debug(DEBUG_FUNCTION, "handle_event(pid=%d, type=%d)",
+	      event->proc ? event->proc->pid : -1, event->type);
+
+	/* If the thread group or an individual task define an
+	   overriding event handler, give them a chance to kick in.
+	   We will end up calling both handlers, if the first one
+	   doesn't sink the event.  */
+	if (event->proc != NULL) {
+		event = call_handler(event->proc, event);
+		if (event == NULL)
+			/* It was handled.  */
+			return;
+
+		/* Note: the previous handler has a chance to alter
+		 * the event.  */
+		if (event->proc != NULL
+		    && event->proc->leader != NULL
+		    && event->proc != event->proc->leader) {
+			event = call_handler(event->proc->leader, event);
+			if (event == NULL)
+				return;
+		}
+	}
+
 	switch (event->type) {
 	case EVENT_NONE:
 		debug(1, "event: none");
@@ -84,6 +124,7 @@ handle_event(Event *event) {
 		handle_arch_sysret(event);
 		return;
 	case EVENT_CLONE:
+	case EVENT_VFORK:
 		debug(1, "event: clone (%u)", event->e_un.newpid);
 		handle_clone(event);
 		return;
@@ -107,14 +148,17 @@ handle_event(Event *event) {
 
 /* TODO */
 static void *
-address_clone(void * addr) {
+address_clone(void * addr, void * data)
+{
 	debug(DEBUG_FUNCTION, "address_clone(%p)", addr);
 	return addr;
 }
 
 static void *
-breakpoint_clone(void * bp) {
+breakpoint_clone(void * bp, void * data)
+{
 	Breakpoint * b;
+	Dict * map = data;
 	debug(DEBUG_FUNCTION, "breakpoint_clone(%p)", bp);
 	b = malloc(sizeof(Breakpoint));
 	if (!b) {
@@ -122,6 +166,15 @@ breakpoint_clone(void * bp) {
 		exit(1);
 	}
 	memcpy(b, bp, sizeof(Breakpoint));
+	if (b->libsym != NULL) {
+		struct library_symbol * sym = dict_find_entry(map, b->libsym);
+		if (b->libsym == NULL) {
+			fprintf(stderr, "Can't find cloned symbol %s.\n",
+				b->libsym->name);
+			return NULL;
+		}
+		b->libsym = sym;
+	}
 	return b;
 }
 
@@ -186,6 +239,40 @@ pending_new_remove(pid_t pid) {
 	}
 }
 
+static int
+clone_breakpoints(Process * proc, Process * orig_proc)
+{
+	/* When copying breakpoints, we also have to copy the
+	 * referenced symbols, and link them properly.  */
+	Dict * map = dict_init(&dict_key2hash_int, &dict_key_cmp_int);
+	struct library_symbol * it = proc->list_of_symbols;
+	proc->list_of_symbols = NULL;
+	for (; it != NULL; it = it->next) {
+		struct library_symbol * libsym = clone_library_symbol(it);
+		if (libsym == NULL) {
+			int save_errno;
+		err:
+			save_errno = errno;
+			destroy_library_symbol_chain(proc->list_of_symbols);
+			dict_clear(map);
+			errno = save_errno;
+			return -1;
+		}
+		libsym->next = proc->list_of_symbols;
+		proc->list_of_symbols = libsym;
+		if (dict_enter(map, it, libsym) != 0)
+			goto err;
+	}
+
+	proc->breakpoints = dict_clone2(orig_proc->breakpoints,
+					address_clone, breakpoint_clone, map);
+	if (proc->breakpoints == NULL)
+		goto err;
+
+	dict_clear(map);
+	return 0;
+}
+
 static void
 handle_clone(Event * event) {
 	Process *p;
@@ -198,30 +285,39 @@ handle_clone(Event * event) {
 		exit(1);
 	}
 	memcpy(p, event->proc, sizeof(Process));
-	p->breakpoints = dict_clone(event->proc->breakpoints, address_clone, breakpoint_clone);
 	p->pid = event->e_un.newpid;
 	p->parent = event->proc;
 
+	/* We save register values to the arch pointer, and these need
+	   to be per-thread.  */
+	p->arch_ptr = NULL;
+
 	if (pending_new(p->pid)) {
 		pending_new_remove(p->pid);
-		if (p->breakpoint_being_enabled) {
-			enable_breakpoint(p->pid, p->breakpoint_being_enabled);
-			p->breakpoint_being_enabled = NULL;
-		}
+		if (p->event_handler != NULL)
+			destroy_event_handler(p);
 		if (event->proc->state == STATE_ATTACHED && options.follow) {
 			p->state = STATE_ATTACHED;
 		} else {
 			p->state = STATE_IGNORED;
 		}
 		continue_process(p->pid);
-		p->next = list_of_processes;
-		list_of_processes = p;
+		add_process(p);
 	} else {
 		p->state = STATE_BEING_CREATED;
-		p->next = list_of_processes;
-		list_of_processes = p;
+		add_process(p);
 	}
-	continue_process(event->proc->pid);
+
+	if (p->leader == p)
+		clone_breakpoints(p, event->proc->leader);
+	else
+		/* Thread groups share breakpoints.  */
+		p->breakpoints = NULL;
+
+	if (event->type == EVENT_VFORK)
+		continue_after_vfork(p);
+	else
+		continue_process(event->proc->pid);
 }
 
 static void
@@ -235,10 +331,6 @@ handle_new(Event * event) {
 		pending_new_insert(event->e_un.newpid);
 	} else {
 		assert(proc->state == STATE_BEING_CREATED);
-		if (proc->breakpoint_being_enabled) {
-			enable_breakpoint(proc->pid, proc->breakpoint_being_enabled);
-			proc->breakpoint_being_enabled = NULL;
-		}
 		if (options.follow) {
 			proc->state = STATE_ATTACHED;
 		} else {
@@ -323,13 +415,6 @@ arch_sysname(Process *proc, int sysnum) {
 static void
 handle_signal(Event *event) {
 	debug(DEBUG_FUNCTION, "handle_signal(pid=%d, signum=%d)", event->proc->pid, event->e_un.signum);
-	if (exiting && event->e_un.signum == SIGSTOP) {
-		pid_t pid = event->proc->pid;
-		disable_all_breakpoints(event->proc);
-		untrace_pid(pid);
-		remove_proc(event->proc);
-		return;
-	}
 	if (event->proc->state != STATE_IGNORED && !options.no_signals) {
 		output_line(event->proc, "--- %s (%s) ---",
 				shortsignal(event->proc, event->e_un.signum),
@@ -345,7 +430,7 @@ handle_exit(Event *event) {
 		output_line(event->proc, "+++ exited (status %d) +++",
 				event->e_un.ret_val);
 	}
-	remove_proc(event->proc);
+	remove_process(event->proc);
 }
 
 static void
@@ -355,31 +440,7 @@ handle_exit_signal(Event *event) {
 		output_line(event->proc, "+++ killed by %s +++",
 				shortsignal(event->proc, event->e_un.signum));
 	}
-	remove_proc(event->proc);
-}
-
-static void
-remove_proc(Process *proc) {
-	Process *tmp, *tmp2;
-
-	debug(DEBUG_FUNCTION, "remove_proc(pid=%d)", proc->pid);
-
-	if (list_of_processes == proc) {
-		tmp = list_of_processes;
-		list_of_processes = list_of_processes->next;
-		free(tmp);
-		return;
-	}
-	tmp = list_of_processes;
-	while (tmp->next) {
-		if (tmp->next == proc) {
-			tmp2 = tmp->next;
-			tmp->next = tmp->next->next;
-			free(tmp2);
-			continue;
-		}
-		tmp = tmp->next;
-	}
+	remove_process(event->proc);
 }
 
 static void
@@ -389,13 +450,13 @@ handle_syscall(Event *event) {
 		callstack_push_syscall(event->proc, event->e_un.sysnum);
 		if (options.syscalls) {
 			output_left(LT_TOF_SYSCALL, event->proc,
-					sysname(event->proc, event->e_un.sysnum));
+				    sysname(event->proc, event->e_un.sysnum));
 		}
 		if (event->proc->breakpoints_enabled == 0) {
 			enable_all_breakpoints(event->proc);
 		}
 	}
-	continue_process(event->proc->pid);
+	continue_after_syscall(event->proc, event->e_un.sysnum, 0);
 }
 
 static void
@@ -406,7 +467,7 @@ handle_exec(Event * event) {
 	debug(DEBUG_FUNCTION, "handle_exec(pid=%d)", proc->pid);
 	if (proc->state == STATE_IGNORED) {
 		untrace_pid(proc->pid);
-		remove_proc(proc);
+		remove_process(proc);
 		return;
 	}
 	output_line(proc, "--- Called exec() ---");
@@ -417,7 +478,7 @@ handle_exec(Event * event) {
 	proc->filename = pid2name(proc->pid);
 	saved_pid = proc->pid;
 	proc->pid = 0;
-	breakpoints_init(proc);
+	breakpoints_init(proc, 0);
 	proc->pid = saved_pid;
 	proc->callstack_depth = 0;
 	continue_process(proc->pid);
@@ -474,9 +535,12 @@ handle_sysret(Event *event) {
 			output_right(LT_TOF_SYSCALLR, event->proc,
 					sysname(event->proc, event->e_un.sysnum));
 		}
+		assert(event->proc->callstack_depth > 0);
+		unsigned d = event->proc->callstack_depth - 1;
+		assert(event->proc->callstack[d].is_syscall);
 		callstack_pop(event->proc);
 	}
-	continue_process(event->proc->pid);
+	continue_after_syscall(event->proc, event->e_un.sysnum, 1);
 }
 
 static void
@@ -503,6 +567,13 @@ static void
 handle_breakpoint(Event *event) {
 	int i, j;
 	Breakpoint *sbp;
+	Process *leader = event->proc->leader;
+
+	/* The leader has terminated.  */
+	if (leader == NULL) {
+		continue_process(event->proc->pid);
+		return;
+	}
 
 	debug(DEBUG_FUNCTION, "handle_breakpoint(pid=%d, addr=%p)", event->proc->pid, event->e_un.brk_addr);
 	debug(2, "event: breakpoint (%p)", event->e_un.brk_addr);
@@ -513,7 +584,7 @@ handle_breakpoint(Event *event) {
 	Breakpoint *stub_bp = NULL;
 	char nop_instruction[] = PPC_NOP;
 
-	stub_bp = address2bpstruct (event->proc, event->e_un.brk_addr);
+	stub_bp = address2bpstruct(leader, event->e_un.brk_addr);
 
 	if (stub_bp) {
 		unsigned char *bp_instruction = stub_bp->orig_value;
@@ -528,14 +599,6 @@ handle_breakpoint(Event *event) {
 		}
 	}
 #endif
-	if ((sbp = event->proc->breakpoint_being_enabled) != 0) {
-		/* Reinsert breakpoint */
-		continue_enabling_breakpoint(event->proc->pid,
-					     event->proc->
-					     breakpoint_being_enabled);
-		event->proc->breakpoint_being_enabled = NULL;
-		return;
-	}
 
 	for (i = event->proc->callstack_depth - 1; i >= 0; i--) {
 		if (event->e_un.brk_addr ==
@@ -554,7 +617,7 @@ handle_breakpoint(Event *event) {
 			if (libsym->plt_type != LS_TOPLT_POINT) {
 				unsigned char break_insn[] = BREAKPOINT_VALUE;
 
-				sbp = address2bpstruct(event->proc, addr);
+				sbp = address2bpstruct(leader, addr);
 				assert(sbp);
 				a = ptrace(PTRACE_PEEKTEXT, event->proc->pid,
 					   addr);
@@ -562,10 +625,10 @@ handle_breakpoint(Event *event) {
 				if (memcmp(&a, break_insn, BREAKPOINT_LENGTH)) {
 					sbp->enabled--;
 					insert_breakpoint(event->proc, addr,
-							  libsym);
+							  libsym, 1);
 				}
 			} else {
-				sbp = dict_find_entry(event->proc->breakpoints, addr);
+				sbp = dict_find_entry(leader->breakpoints, addr);
 				/* On powerpc, the breakpoint address
 				   may end up being actual entry point
 				   of the library symbol, not the PLT
@@ -573,7 +636,7 @@ handle_breakpoint(Event *event) {
 				   sbp is NULL.  */
 				if (sbp == NULL || addr != sbp->addr) {
 					insert_breakpoint(event->proc, addr,
-							  libsym);
+							  libsym, 1);
 				}
 			}
 #elif defined(__mips__)
@@ -581,18 +644,18 @@ handle_breakpoint(Event *event) {
 			struct library_symbol *sym= event->proc->callstack[i].c_un.libfunc;
 			struct library_symbol *new_sym;
 			assert(sym);
-			addr=sym2addr(event->proc,sym);
-			sbp = dict_find_entry(event->proc->breakpoints, addr);
+			addr = sym2addr(event->proc, sym);
+			sbp = dict_find_entry(leader->breakpoints, addr);
 			if (sbp) {
 				if (addr != sbp->addr) {
-					insert_breakpoint(event->proc, addr, sym);
+					insert_breakpoint(event->proc, addr, sym, 1);
 				}
 			} else {
 				new_sym=malloc(sizeof(*new_sym) + strlen(sym->name) + 1);
 				memcpy(new_sym,sym,sizeof(*new_sym) + strlen(sym->name) + 1);
-				new_sym->next=event->proc->list_of_symbols;
-				event->proc->list_of_symbols=new_sym;
-				insert_breakpoint(event->proc, addr, new_sym);
+				new_sym->next = leader->list_of_symbols;
+				leader->list_of_symbols = new_sym;
+				insert_breakpoint(event->proc, addr, new_sym, 1);
 			}
 #endif
 			for (j = event->proc->callstack_depth - 1; j > i; j--) {
@@ -611,18 +674,23 @@ handle_breakpoint(Event *event) {
 						event->proc->callstack[i].c_un.libfunc->name);
 			}
 			callstack_pop(event->proc);
-			continue_after_breakpoint(event->proc,
-					address2bpstruct(event->proc,
-						event->e_un.brk_addr));
+			sbp = address2bpstruct(leader, event->e_un.brk_addr);
+			continue_after_breakpoint(event->proc, sbp);
 			return;
 		}
 	}
 
-	if ((sbp = address2bpstruct(event->proc, event->e_un.brk_addr))) {
-		if (strcmp(sbp->libsym->name, "") == 0) {
-			debug(2, "Hit _dl_debug_state breakpoint!\n");
-			arch_check_dbg(event->proc);
+	if ((sbp = address2bpstruct(leader, event->e_un.brk_addr))) {
+		if (sbp->libsym == NULL) {
+			continue_after_breakpoint(event->proc, sbp);
+			return;
 		}
+
+		if (strcmp(sbp->libsym->name, "") == 0) {
+			debug(DEBUG_PROCESS, "Hit _dl_debug_state breakpoint!\n");
+			arch_check_dbg(leader);
+		}
+
 		if (event->proc->state != STATE_IGNORED) {
 			event->proc->stack_pointer = get_stack_pointer(event->proc);
 			event->proc->return_addr =
@@ -634,7 +702,7 @@ handle_breakpoint(Event *event) {
 		if (event->proc->need_to_reinitialize_breakpoints
 		    && (strcmp(sbp->libsym->name, PLTs_initialized_by_here) ==
 			0))
-			reinitialize_breakpoints(event->proc);
+			reinitialize_breakpoints(leader);
 #endif
 
 		continue_after_breakpoint(event->proc, sbp);
@@ -691,7 +759,7 @@ callstack_push_symfunc(Process *proc, struct library_symbol *sym) {
 
 	elem->return_addr = proc->return_addr;
 	if (elem->return_addr) {
-		insert_breakpoint(proc, elem->return_addr, 0);
+		insert_breakpoint(proc, elem->return_addr, NULL, 1);
 	}
 
 	/* handle functions like atexit() on mips which have no return */
@@ -711,6 +779,7 @@ callstack_pop(Process *proc) {
 	debug(DEBUG_FUNCTION, "callstack_pop(pid=%d)", proc->pid);
 	elem = &proc->callstack[proc->callstack_depth - 1];
 	if (!elem->is_syscall && elem->return_addr) {
+		assert(proc->leader != NULL);
 		delete_breakpoint(proc, elem->return_addr);
 	}
 	if (elem->arch_ptr != NULL) {

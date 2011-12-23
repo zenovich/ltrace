@@ -1,6 +1,6 @@
 Function *
-name2func(char *name);
+name2func(const char *name);
 
 void output_line(Process *proc, char *fmt, ...);
-void output_left(enum tof type, Process *proc, char *function_name);
+void output_left(enum tof type, Process *proc, char const *function_name);
 void output_right(enum tof type, Process *proc, char *function_name);
