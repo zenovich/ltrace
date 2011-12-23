@@ -150,8 +150,6 @@ mock_return(enum tof type, Process *proc, char *function_name) {
 					uunmovebytes(proc, addr, (void *) &real_time_fake, sizeof(struct timeval));
 				}
 			} else if (strcmp(function_name, "clock_gettime") == 0) {
-				arg_type_info infot;
-				infot.type = ARGTYPE_INT;
 				clockid_t type = (clockid_t) gimme_arg(LT_TOF_FUNCTION, proc, 0, &infoi);
 				void *addr = (void *)gimme_arg(LT_TOF_FUNCTION, proc, 1, &infop);
 				if (addr && type == CLOCK_REALTIME)
