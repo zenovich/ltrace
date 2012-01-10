@@ -83,7 +83,7 @@ else:
     dnl Need to change quote character because of [:2]
     AC_SUBST(PYTHON_VERSION)
     changequote(<<, >>)dnl
-    PYTHON_VERSION=`$PYTHON -c "import sys; print '.'.join(map(str,sys.version_info[:2]))"`
+    PYTHON_VERSION=`$PYTHON -c "import sys; print('.'.join(map(str,sys.version_info[:2])))"`
     changequote([, ])dnl
 
 
@@ -102,7 +102,7 @@ else:
     dnl to know which OS platform Python thinks this is.
 
     AC_SUBST(PYTHON_PLATFORM)
-    PYTHON_PLATFORM=`$PYTHON -c "import sys; print sys.platform"`
+    PYTHON_PLATFORM=`$PYTHON -c "import sys; print(sys.platform)"`
 
 
     dnl Set up 4 directories:
@@ -171,8 +171,8 @@ except SystemExit, e:
         raise SystemExit('Unknown error')
     raise
 except Exception, e:
-    print '  Error while trying to import $1:'
-    print '    %r: %s' % (e, e)
+    print('  Error while trying to import $1:')
+    print('    %r: %s' % (e, e))
     sys.exit(1)"
   changequote([, ])dnl
 
@@ -195,8 +195,8 @@ AC_DEFUN([AM_CHECK_PYTHON_HEADERS],
   AC_MSG_CHECKING(for headers required to compile python extensions)
 
   dnl deduce PYTHON_INCLUDES
-  py_prefix=`$PYTHON -c "import sys; print sys.prefix"`
-  py_exec_prefix=`$PYTHON -c "import sys; print sys.exec_prefix"`
+  py_prefix=`$PYTHON -c "import sys; print(sys.prefix)"`
+  py_exec_prefix=`$PYTHON -c "import sys; print(sys.exec_prefix)"`
   PYTHON_INCLUDES="-I${py_prefix}/include/python${PYTHON_VERSION}"
 
   if test "$py_prefix" != "$py_exec_prefix"; then

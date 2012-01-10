@@ -88,7 +88,7 @@ mock_return(enum tof type, Process *proc, char *function_name) {
 				Py_DECREF(pArgs);
 				if (pValue != NULL) {
 					if (pValue != Py_None) {
-						set_arg(type, proc, -1, func->return_info, PyInt_AsLong(pValue));
+						set_arg(type, proc, -1, func->return_info, PyLong_AsLong(pValue));
 						set_arch_dep(proc);
 					}
 					Py_DECREF(pValue);
@@ -233,7 +233,7 @@ set_format_into_python_tuple(enum tof type, Process *proc, int arg_num, PyObject
 				} else if (c == 'd' || c == 'i' || c == 'o' || c == 'x') {
 					info.type = ARGTYPE_LONG;
 					if (!is_long || proc->mask_32bit) {
-						PyObject *pl = PyInt_FromLong((int)gimme_arg(type, proc, ++arg_num, &info));
+						PyObject *pl = PyLong_FromLong((int)gimme_arg(type, proc, ++arg_num, &info));
 						if (!pl) {
 							PyTuple_SetItem(pArgs, arg_num, Py_None);
 						} else {
@@ -251,7 +251,7 @@ set_format_into_python_tuple(enum tof type, Process *proc, int arg_num, PyObject
 				} else if (c == 'u') {
 					info.type = ARGTYPE_LONG;
 					if (!is_long || proc->mask_32bit) {
-						PyObject *pl = PyInt_FromLong((int)gimme_arg(type, proc, ++arg_num, &info));
+						PyObject *pl = PyLong_FromLong((int)gimme_arg(type, proc, ++arg_num, &info));
 						if (!pl) {
 							PyTuple_SetItem(pArgs, arg_num, Py_None);
 						} else {
@@ -273,7 +273,7 @@ set_format_into_python_tuple(enum tof type, Process *proc, int arg_num, PyObject
 					break;
 				} else if (c == 'c') {
 					info.type = ARGTYPE_LONG;
-					PyObject *pl = PyInt_FromLong((int)gimme_arg(type, proc, ++arg_num, &info));
+					PyObject *pl = PyLong_FromLong((int)gimme_arg(type, proc, ++arg_num, &info));
 					if (!pl) {
 						PyTuple_SetItem(pArgs, arg_num, Py_None);
 					} else {
@@ -299,7 +299,7 @@ set_format_into_python_tuple(enum tof type, Process *proc, int arg_num, PyObject
 					break;
 				} else if (c == '*') {
 					info.type = ARGTYPE_LONG;
-					PyObject *pl = PyInt_FromLong((int)gimme_arg(type, proc, ++arg_num, &info));
+					PyObject *pl = PyLong_FromLong((int)gimme_arg(type, proc, ++arg_num, &info));
 					if (!pl) {
 						PyTuple_SetItem(pArgs, arg_num, Py_None);
 					} else {
@@ -333,26 +333,26 @@ convert_value_to_python(enum tof type, Process *proc,
 		case ARGTYPE_VOID:
 			return Py_None;
 		case ARGTYPE_INT:
-			return PyInt_FromLong((int) value);
+			return PyLong_FromLong((int) value);
 		case ARGTYPE_UINT:
 		case ARGTYPE_OCTAL:
-			return PyInt_FromLong((unsigned) value);
+			return PyLong_FromLong((unsigned) value);
 		case ARGTYPE_LONG:
 			if (proc->mask_32bit)
-				return PyInt_FromLong((int) value);
+				return PyLong_FromLong((int) value);
 			else
 				return PyLong_FromLong(value);
 		case ARGTYPE_ULONG:
 			if (proc->mask_32bit)
-				return PyInt_FromLong((unsigned) value);
+				return PyLong_FromLong((unsigned) value);
 			else
 				return PyLong_FromUnsignedLong((unsigned long) value);
 		case ARGTYPE_CHAR:
-			return PyInt_FromLong((char) value);
+			return PyLong_FromLong((char) value);
 		case ARGTYPE_SHORT:
-			return PyInt_FromLong((short) value);
+			return PyLong_FromLong((short) value);
 		case ARGTYPE_USHORT:
-			return PyInt_FromLong((unsigned short) value);
+			return PyLong_FromLong((unsigned short) value);
 		case ARGTYPE_DOUBLE:
 		case ARGTYPE_FLOAT: {
 					    union { long l; float f; double d; } cvt;
@@ -385,13 +385,13 @@ convert_value_to_python(enum tof type, Process *proc,
 		case ARGTYPE_ARRAY:
 				    return Py_None;
 		case ARGTYPE_ENUM:
-				    return PyInt_FromLong((int) value);
+				    return PyLong_FromLong((int) value);
 		case ARGTYPE_STRUCT:
 				    return Py_None;
 		case ARGTYPE_UNKNOWN:
 		default:
 				    if (proc->mask_32bit)
-					    return PyInt_FromLong((int) value);
+					    return PyLong_FromLong((int) value);
 				    else
 					    return PyLong_FromLong(value);
 	}
@@ -410,7 +410,11 @@ convert_string_to_python(enum tof type, Process *proc, void *addr,
 		return Py_None;
 
 	int len = umovestr(proc, addr, maxlength, str1);
+#if PY_MAJOR_VERSION >= 3
+	PyObject *result = PyBytes_FromStringAndSize(str1, (Py_ssize_t) len);
+#else
 	PyObject *result = PyString_FromStringAndSize(str1, (Py_ssize_t) len);
+#endif
 	free(str1);
 	if (!result)
 		return Py_None;
