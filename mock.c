@@ -194,13 +194,13 @@ set_format_into_python_tuple(enum tof type, Process *proc, int arg_num, PyObject
 		return arg_num;
 	}
 
-	str1 = malloc(INT_MAX);
+	str1 = malloc(INT_MAX / 1000);
 	if (!str1) {
 		PyTuple_SetItem(pArgs, arg_num, Py_None);
 		return arg_num;
 	}
 
-	int len = umovebytes(proc, addr, str1, INT_MAX - 2);
+	int len = umovebytes(proc, addr, str1, INT_MAX / 1000 - 2);
 
 	PyObject *pystr;
 	pystr = PyByteArray_FromStringAndSize(addr, len);
@@ -282,7 +282,7 @@ set_format_into_python_tuple(enum tof type, Process *proc, int arg_num, PyObject
 					break;
 				} else if (c == 's') {
 					info.type = ARGTYPE_POINTER;
-					pystr = PyByteArray_FromStringAndSize((void *)gimme_arg(type, proc, ++arg_num, &info), INT_MAX - 2);
+					pystr = PyByteArray_FromStringAndSize((void *)gimme_arg(type, proc, ++arg_num, &info), INT_MAX/1000 - 2);
 					if (!pystr) {
 						PyTuple_SetItem(pArgs, arg_num, Py_None);
 					} else {
@@ -370,14 +370,14 @@ convert_value_to_python(enum tof type, Process *proc,
 				    exit(1);
 		case ARGTYPE_STRING:
 				    return convert_string_to_python(type, proc, (void*) value,
-						    INT_MAX);
+						    INT_MAX / 1000);
 		case ARGTYPE_STRING_N:
 				    return convert_string_to_python(type, proc, (void*) value,
 						    get_length(type, proc,
 							    info->u.string_n_info.size_spec, st, st_info));
 		case ARGTYPE_BYTES:
 				    return convert_bytes_to_python(type, proc, (void*) value,
-						    INT_MAX);
+						    INT_MAX / 1000);
 		case ARGTYPE_BYTES_N:
 				    return convert_bytes_to_python(type, proc, (void*) value,
 						    get_length(type, proc,
