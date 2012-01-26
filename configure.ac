@@ -1,4 +1,4 @@
-m4_include([m4/as-python.m4])
+m4_include([m4/am-python.m4])
 
 # -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
@@ -67,28 +67,91 @@ AC_CHECK_LIB([elf], [elf_begin],,
 CPPFLAGS="${saved_CPPFLAGS}"
 LDFLAGS="${saved_LDFLAGS}"
 
-#Python
-AS_PATH_PYTHON([2.6.0],[ # Byte-arrays were introduced in version 2.6
-	AM_CHECK_PYTHON_LIBS(
-		[
-			AM_LDFLAGS="${AM_LDFLAGS} $PYTHON_LIBS"
-			AM_CHECK_PYTHON_HEADERS(
-				[
-					AC_DEFINE([HAVE_PYTHON], [1], [we have python])
-					AM_CPPFLAGS="$AM_CPPFLAGS $PYTHON_INCLUDES"
-				],
-				[
-					AC_MSG_NOTICE([could not find Python headers])
-				]
-			)
-		],
-		[
-			AC_MSG_NOTICE([could not find Python libs])
-		]
-	)
-	],
-	[AC_MSG_NOTICE([could not find python version >= 2.6])]
-)
+# Python
+AC_ARG_WITH([python],
+  AC_HELP_STRING([--with-python], [Build python bindings @<:@default=no@:>@]),[],[with_python=no])
+
+PYTHON_VERSION=
+PYTHON_INCLUDES=
+if test "$with_python" != "no" ; then
+    if test -x "$with_python/bin/python"
+    then
+        AC_MSG_NOTICE(Found python in $with_python/bin/python)
+        PYTHON="$with_python/bin/python"
+        with_python=yes
+    else
+        if test -x "$with_python"
+        then
+            AC_MSG_NOTICE(Found python in $with_python)
+            PYTHON="$with_python"
+            with_python=yes
+        else
+            if test -x "$PYTHON"
+            then
+                AC_MSG_NOTICE(Found python in environment PYTHON=$PYTHON)
+                with_python=yes
+            fi
+        fi
+    fi
+
+    if test "$with_python" = "yes" ; then
+        AM_PATH_PYTHON([2.6.0],, [:])
+
+        if test "$PYTHON" != : ; then
+            PYTHON_CONFIG="$PYTHON-config"
+
+            if test -x "$PYTHON_CONFIG"
+            then
+                PYTHON_INCLUDES=`$PYTHON_CONFIG --includes`
+                PYTHON_LIBS=`$PYTHON_CONFIG --libs`
+            else
+                if test -r $PYTHON_EXEC_PREFIX/include/python$PYTHON_VERSION/Python.h
+                then
+                    PYTHON_INCLUDES=-I$PYTHON_EXEC_PREFIX/include/python$PYTHON_VERSION
+                else
+                    if test -r $prefix/include/python$PYTHON_VERSION/Python.h
+                    then
+                        PYTHON_INCLUDES=-I$prefix/include/python$PYTHON_VERSION
+                    else
+                        if test -r /usr/include/python$PYTHON_VERSION/Python.h
+                        then
+                            PYTHON_INCLUDES=-I/usr/include/python$PYTHON_VERSION
+                        else
+                            AC_MSG_ERROR([You must install python-devel to build Python bindings])
+                        fi
+                    fi
+                fi
+                if test -r $PYTHON_EXEC_PREFIX/lib/libpython$PYTHON_VERSION.so
+                then
+                    PYTHON_LIBS=-L$PYTHON_EXEC_PREFIX/lib/python$PYTHON_VERSION
+                else
+                    if test -r $prefix/lib/libpython$PYTHON_VERSION.so
+                    then
+                        PYTHON_LIBS=-L$prefix/lib/libpython$PYTHON_VERSION.so
+                    else
+                        if test -r /usr/lib/libpython$PYTHON_VERSION.so
+                        then
+                            PYTHON_LIBS=-L/usr/lib/libpython$PYTHON_VERSION.so
+                        else
+                            AC_MSG_ERROR([You must install python-devel to build Python bindings])
+                        fi
+                    fi
+                fi
+            fi
+        else
+            AC_MSG_ERROR([You must install python to build Python bindings])
+        fi
+    else
+        AC_MSG_ERROR([Could not find python in $with_python])
+    fi
+fi
+if test "$with_python" = "yes" ; then
+  AC_DEFINE([HAVE_PYTHON], [1], [we have python])
+  AC_SUBST([PYTHON_VERSION])
+  AC_SUBST([PYTHON_INCLUDES])
+  AM_LDFLAGS="${AM_LDFLAGS} $PYTHON_LIBS"
+  AM_CPPFLAGS="$AM_CPPFLAGS $PYTHON_INCLUDES"
+fi 
 
 # HAVE_LIBIBERTY
 AC_CHECK_LIB([iberty], [cplus_demangle], [
